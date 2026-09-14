@@ -101,6 +101,10 @@ be outdated. Changing the model does not add internet access.
 ## Speech-to-text model
 
 Pinned to `openai/whisper-large-v3-turbo` via OpenRouter for transcribing
-recorded audio before it is sent to the chat model. Accuracy depends on
-this model and on microphone input quality; there is no local/offline
-fallback if OpenRouter is unreachable.
+recorded audio before it is sent to the chat model, with a fallback to
+`openai/whisper-large-v3` if the primary is rate-limited or unavailable.
+These are the cheapest and second-cheapest transcription models on
+OpenRouter. Accuracy depends on the model used and on microphone input
+quality; there is no local/offline fallback if OpenRouter is unreachable.
+The model used is logged in Serial Monitor for every successful
+transcription.

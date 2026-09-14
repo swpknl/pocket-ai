@@ -26,7 +26,13 @@ const char *TRANSCRIBE_URL =
 // unavailable (OpenRouter's free tier deprecates/limits models often).
 const char *CHAT_MODEL = "inclusionai/ling-3.0-flash-vl:free";
 const char *CHAT_MODEL_FALLBACK = "meta-llama/llama-3.3-70b-instruct:free";
+
+// TRANSCRIBE_MODEL is the cheapest OpenRouter transcription model at
+// $0.0000033/s of audio; TRANSCRIBE_MODEL_FALLBACK is the next cheapest
+// distinct model ($0.0000075/s), retried once if the primary is rate-limited
+// or unavailable.
 const char *TRANSCRIBE_MODEL = "openai/whisper-large-v3-turbo";
+const char *TRANSCRIBE_MODEL_FALLBACK = "openai/whisper-large-v3";
 
 constexpr uint32_t SAMPLE_RATE = 16000;
 constexpr unsigned long IDLE_SLEEP_MS = 2UL * 60UL * 1000UL;
@@ -566,61 +572,82 @@ String transcribe(uint8_t *wav, size_t wavLength)
   showStatus("Transcribing...");
 
   const String boundary = "----PocketAI7cf942e1";
+  const String tail = "\r\n--" + boundary + "--\r\n";
 
-  String head = "--" + boundary + "\r\n";
-  head +=
-      "Content-Disposition: form-data; "
-      "name=\"model\"\r\n\r\n";
-  head += TRANSCRIBE_MODEL;
-
-  head += "\r\n--" + boundary + "\r\n";
-  head +=
-      "Content-Disposition: form-data; "
-      "name=\"file\"; filename=\"question.wav\"\r\n";
-  head += "Content-Type: audio/wav\r\n\r\n";
-
-  const String tail =
-      "\r\n--" + boundary + "--\r\n";
-
-  const size_t total =
-      head.length() + wavLength + tail.length();
-
-  uint8_t *upload = static_cast<uint8_t *>(
-      heap_caps_malloc(
-          total,
-          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-
-  if (!upload)
-  {
-    showMessage("Not enough PSRAM for audio upload.");
-    return "";
-  }
-
-  memcpy(upload, head.c_str(), head.length());
-
-  memcpy(
-      upload + head.length(),
-      wav,
-      wavLength);
-
-  memcpy(
-      upload + head.length() + wavLength,
-      tail.c_str(),
-      tail.length());
+  const char *models[] = {TRANSCRIBE_MODEL, TRANSCRIBE_MODEL_FALLBACK};
+  constexpr size_t modelCount = sizeof(models) / sizeof(models[0]);
 
   JsonDocument response;
+  bool ok = false;
+  int status = 0;
 
-  const bool ok = postRequest(
-      TRANSCRIBE_URL,
-      "multipart/form-data; boundary=" + boundary,
-      upload,
-      total,
-      response);
+  for (size_t i = 0; i < modelCount; ++i)
+  {
+    if (i > 0)
+    {
+      Serial.println("Retrying with fallback transcription model...");
+      showStatus("Retrying...");
+    }
 
-  heap_caps_free(upload);
+    String head = "--" + boundary + "\r\n";
+    head +=
+        "Content-Disposition: form-data; "
+        "name=\"model\"\r\n\r\n";
+    head += models[i];
+
+    head += "\r\n--" + boundary + "\r\n";
+    head +=
+        "Content-Disposition: form-data; "
+        "name=\"file\"; filename=\"question.wav\"\r\n";
+    head += "Content-Type: audio/wav\r\n\r\n";
+
+    const size_t total =
+        head.length() + wavLength + tail.length();
+
+    uint8_t *upload = static_cast<uint8_t *>(
+        heap_caps_malloc(
+            total,
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+
+    if (!upload)
+    {
+      showMessage("Not enough PSRAM for audio upload.");
+      return "";
+    }
+
+    memcpy(upload, head.c_str(), head.length());
+
+    memcpy(
+        upload + head.length(),
+        wav,
+        wavLength);
+
+    memcpy(
+        upload + head.length() + wavLength,
+        tail.c_str(),
+        tail.length());
+
+    response.clear();
+
+    ok = postRequest(
+        TRANSCRIBE_URL,
+        "multipart/form-data; boundary=" + boundary,
+        upload,
+        total,
+        response,
+        &status);
+
+    heap_caps_free(upload);
+
+    if (ok || !isRetryableStatus(status))
+      break;
+  }
 
   if (!ok)
     return "";
+
+  Serial.print("Transcription model: ");
+  Serial.println(response["model"] | "unknown");
 
   String text;
 
