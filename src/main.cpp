@@ -217,7 +217,10 @@ void resetButtonState()
 
 bool connectWiFi(bool showFailure = true);
 
-// Light sleep retains the answer and page position in RAM.
+// Deep sleep draws far less current than light sleep. Waking resets the
+// chip and reruns setup() from scratch, so no RAM state (screen, answer,
+// page position) survives -- the device always boots back to the home
+// screen after sleep.
 void enterSleep()
 {
   if (M5.getBoard() != m5::board_t::board_M5StickS3)
@@ -227,12 +230,11 @@ void enterSleep()
     return;
   }
 
-  esp_err_t result = gpio_wakeup_enable(WAKE_BUTTON_PIN, GPIO_INTR_LOW_LEVEL);
-  if (result == ESP_OK)
-    result = esp_sleep_enable_gpio_wakeup();
+  const esp_err_t result =
+      esp_sleep_enable_ext0_wakeup(WAKE_BUTTON_PIN, 0);
+
   if (result != ESP_OK)
   {
-    gpio_wakeup_disable(WAKE_BUTTON_PIN);
     showMessage("Could not configure wake button.");
     resetButtonState();
     return;
@@ -242,32 +244,13 @@ void enterSleep()
   M5.Speaker.end();
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
-  Serial.println("Sleeping. Press A to wake.");
+  Serial.println("Deep sleeping. Press A to wake.");
   Serial.flush();
   M5.Display.sleep();
   M5.Display.waitDisplay();
 
-  result = esp_light_sleep_start();
-
-  gpio_wakeup_disable(WAKE_BUTTON_PIN);
-  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
-  M5.Display.wakeup();
-  // Connecting changes the screen; retain the page to restore afterward.
-  const Screen screenBeforeReconnect = currentScreen;
-  if (!connectWiFi(false))
-    Serial.println("Wake WiFi reconnect failed. Will retry on the next question.");
-
-  if (result != ESP_OK)
-    showMessage(String("Sleep failed: ") + esp_err_to_name(result));
-  else if (screenBeforeReconnect == Screen::Text)
-    showPage();
-  else if (screenBeforeReconnect == Screen::Battery)
-    showBatteryPage();
-  else
-    showHome();
-
-  // Consume the wake press so it cannot start a recording.
-  resetButtonState();
+  esp_deep_sleep_start();
+  // Never reached: deep sleep resets the chip.
 }
 
 // ---------- Wi-Fi ----------

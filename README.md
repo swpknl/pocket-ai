@@ -57,23 +57,24 @@ Holding **Button B** for one second always returns to the home screen.
 
 ## Sleep mode
 
-- After two minutes without button or serial input, the stick enters light sleep.
+- After two minutes without button or serial input, the stick enters deep sleep.
 - Hold **B for three seconds**, then release, to sleep manually. The existing
   one-second hold still returns home.
-- Press **A** to wake. Release it before holding A again to record.
-- The display, Wi-Fi, microphone and speaker are stopped during sleep.
-  The current answer and page remain in memory. On wake, Wi-Fi reconnects
-  immediately (up to 30 seconds), then the previous screen is restored. If
-  reconnection fails, the stick retries when you next ask a question.
+- Press **A** to wake. This resets the chip: the stick reruns startup, so wake
+  takes a few seconds and always lands on the home screen (no answer or page
+  is retained across sleep).
+- The display, Wi-Fi, microphone and speaker are stopped before sleeping, and
+  power draw during sleep is far lower than a suspend/resume ("light") sleep
+  would give, at the cost of losing in-memory state on wake.
 - Recording and network requests finish before the idle timer starts again.
   An unfinished Serial Monitor question prevents automatic sleep.
 - USB serial is unavailable during sleep; use A to wake and reconnect the
   monitor if needed.
 - Change `IDLE_SLEEP_MS` in `src/main.cpp` to adjust the idle timeout.
 
-Hardware validation after uploading: check manual sleep, idle sleep, A wake
-without accidental recording, answer-page retention, and the first voice/serial
-request after waking. Repeat on battery and USB power.
+Hardware validation after uploading: check manual sleep, idle sleep, and A
+wake (confirm it boots to home without an accidental recording starting).
+Repeat on battery and USB power.
 
 
 ## Chat model
