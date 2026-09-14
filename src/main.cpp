@@ -26,7 +26,7 @@ const char *TRANSCRIBE_URL =
 // unavailable (OpenRouter's free tier deprecates/limits models often).
 const char *CHAT_MODEL = "inclusionai/ling-3.0-flash-vl:free";
 const char *CHAT_MODEL_FALLBACK = "meta-llama/llama-3.3-70b-instruct:free";
-const char *TRANSCRIBE_MODEL = "openai/whisper-large-v3";
+const char *TRANSCRIBE_MODEL = "openai/whisper-large-v3-turbo";
 
 constexpr uint32_t SAMPLE_RATE = 16000;
 constexpr unsigned long IDLE_SLEEP_MS = 2UL * 60UL * 1000UL;
