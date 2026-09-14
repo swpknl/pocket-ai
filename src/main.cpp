@@ -5,6 +5,8 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <esp_heap_caps.h>
+#include <esp_sleep.h>
+#include <driver/gpio.h>
 
 #include "secrets.h"
 
@@ -19,10 +21,15 @@ const char *CHAT_URL =
 const char *TRANSCRIBE_URL =
     "https://openrouter.ai/api/v1/audio/transcriptions";
 
-const char *CHAT_MODEL = "openrouter/free";
+// Pin a chat model so the free router cannot select a safety classifier.
+const char *CHAT_MODEL = "inclusionai/ling-3.0-flash-vl:free";
 const char *TRANSCRIBE_MODEL = "openai/whisper-large-v3";
 
 constexpr uint32_t SAMPLE_RATE = 16000;
+constexpr unsigned long IDLE_SLEEP_MS = 2UL * 60UL * 1000UL;
+constexpr unsigned long SLEEP_HOLD_MS = 3000;
+// StickS3 Button A is active-low on GPIO11.
+constexpr gpio_num_t WAKE_BUTTON_PIN = GPIO_NUM_11;
 constexpr size_t CHUNK_SAMPLES = 1600;
 constexpr size_t MAX_RECORD_SECONDS = 30;
 constexpr size_t MAX_SAMPLES =
@@ -47,6 +54,8 @@ size_t nextPageStart = 0;
 bool waitForARelease = false;
 bool waitForBRelease = false;
 bool bHoldHandled = false;
+bool sleepPending = false;
+unsigned long lastActivity = 0;
 
 unsigned long lastBatteryRefresh = 0;
 
@@ -141,14 +150,13 @@ void showHome()
   M5.Display.setCursor(0, 0);
 
   M5.Display.println("Pocket AI");
-  M5.Display.println();
   M5.Display.println("Hold A: speak");
   M5.Display.println("Release A: send");
   M5.Display.printf(
       "Max: %u seconds\n",
       static_cast<unsigned>(MAX_RECORD_SECONDS));
   M5.Display.println("B: battery");
-  M5.Display.println("Hold B: home");
+  M5.Display.println("B 1s:home 3s:sleep");
   M5.Display.println(
       WiFi.status() == WL_CONNECTED
           ? "WiFi: connected"
@@ -189,7 +197,7 @@ void showBatteryPage()
 
   M5.Display.println();
   M5.Display.println("Hold A: ask");
-  M5.Display.println("Hold B: home");
+  M5.Display.println("B 1s:home 3s:sleep");
 }
 
 // Ignore buttons held during blocking network operations.
@@ -200,11 +208,68 @@ void resetButtonState()
   waitForARelease = true;
   waitForBRelease = true;
   bHoldHandled = false;
+  sleepPending = false;
+  lastActivity = millis();
+}
+
+bool connectWiFi(bool showFailure = true);
+
+// Light sleep retains the answer and page position in RAM.
+void enterSleep()
+{
+  if (M5.getBoard() != m5::board_t::board_M5StickS3)
+  {
+    showMessage("Sleep requires StickS3.");
+    resetButtonState();
+    return;
+  }
+
+  esp_err_t result = gpio_wakeup_enable(WAKE_BUTTON_PIN, GPIO_INTR_LOW_LEVEL);
+  if (result == ESP_OK)
+    result = esp_sleep_enable_gpio_wakeup();
+  if (result != ESP_OK)
+  {
+    gpio_wakeup_disable(WAKE_BUTTON_PIN);
+    showMessage("Could not configure wake button.");
+    resetButtonState();
+    return;
+  }
+
+  M5.Mic.end();
+  M5.Speaker.end();
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  Serial.println("Sleeping. Press A to wake.");
+  Serial.flush();
+  M5.Display.sleep();
+  M5.Display.waitDisplay();
+
+  result = esp_light_sleep_start();
+
+  gpio_wakeup_disable(WAKE_BUTTON_PIN);
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
+  M5.Display.wakeup();
+  // Connecting changes the screen; retain the page to restore afterward.
+  const Screen screenBeforeReconnect = currentScreen;
+  if (!connectWiFi(false))
+    Serial.println("Wake WiFi reconnect failed. Will retry on the next question.");
+
+  if (result != ESP_OK)
+    showMessage(String("Sleep failed: ") + esp_err_to_name(result));
+  else if (screenBeforeReconnect == Screen::Text)
+    showPage();
+  else if (screenBeforeReconnect == Screen::Battery)
+    showBatteryPage();
+  else
+    showHome();
+
+  // Consume the wake press so it cannot start a recording.
+  resetButtonState();
 }
 
 // ---------- Wi-Fi ----------
 
-bool connectWiFi()
+bool connectWiFi(bool showFailure)
 {
   if (WiFi.status() == WL_CONNECTED)
     return true;
@@ -226,7 +291,9 @@ bool connectWiFi()
 
   if (WiFi.status() != WL_CONNECTED)
   {
-    showMessage(
+    // Wake reconnects preserve the existing answer even if Wi-Fi is unavailable.
+    if (showFailure)
+      showMessage(
         "WiFi failed.\n"
         "Check your iPhone hotspot and\n"
         "Maximize Compatibility setting.\n\n"
@@ -401,6 +468,9 @@ void askQuestion(const String &question)
     return;
   }
 
+  Serial.print("Model: ");
+  Serial.println(response["model"] | "unknown");
+
   String reply;
 
   if (
@@ -418,9 +488,6 @@ void askQuestion(const String &question)
   {
     const char *finish =
         response["choices"][0]["finish_reason"] | "unknown";
-
-    Serial.print("Model: ");
-    Serial.println(response["model"] | "unknown");
 
     Serial.print("Finish: ");
     Serial.println(finish);
@@ -727,6 +794,9 @@ void loop()
 {
   M5.update();
 
+  if (M5.BtnA.isPressed() || M5.BtnB.isPressed())
+    lastActivity = millis();
+
   // A: hold to record.
   if (waitForARelease)
   {
@@ -762,8 +832,17 @@ void loop()
       showHome();
     }
 
+    if (M5.BtnB.isPressed() && M5.BtnB.pressedFor(SLEEP_HOLD_MS))
+      sleepPending = true;
+
     if (M5.BtnB.wasReleased())
     {
+      if (sleepPending && !M5.BtnA.isPressed())
+      {
+        enterSleep();
+        return;
+      }
+      sleepPending = false;
       if (!bHoldHandled)
       {
         if (currentScreen == Screen::Home)
@@ -803,6 +882,7 @@ void loop()
   // Typed questions remain available over USB.
   while (Serial.available())
   {
+    lastActivity = millis();
     const char ch = Serial.read();
 
     if (ch == '\r')
@@ -826,6 +906,13 @@ void loop()
     {
       serialQuestion += ch;
     }
+  }
+
+  if (!M5.BtnA.isPressed() && !M5.BtnB.isPressed() &&
+      serialQuestion.isEmpty() && millis() - lastActivity >= IDLE_SLEEP_MS)
+  {
+    enterSleep();
+    return;
   }
 
   delay(10);

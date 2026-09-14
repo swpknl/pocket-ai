@@ -9,7 +9,7 @@ LLM, shown on the built-in screen.
 1. Hold **Button A** and speak; release to stop recording (max 30 seconds).
 2. The recording is uploaded to [OpenRouter](https://openrouter.ai) for
    transcription (`openai/whisper-large-v3`).
-3. The transcribed text is sent to a chat model (`openrouter/free`) and the
+3. The transcribed text is sent to a chat model (`inclusionai/ling-3.0-flash-vl:free`) and the
    reply is shown on screen.
 4. You can also type a question into the Serial Monitor instead of speaking;
    the reply is shown the same way.
@@ -53,3 +53,37 @@ Holding **Button B** for one second always returns to the home screen.
   prototyping. Replace with `setCACert()` and proper clock sync before
   relying on this for anything sensitive.
 - Audio is buffered in PSRAM as 16-bit mono PCM at 16 kHz.
+
+
+## Sleep mode
+
+- After two minutes without button or serial input, the stick enters light sleep.
+- Hold **B for three seconds**, then release, to sleep manually. The existing
+  one-second hold still returns home.
+- Press **A** to wake. Release it before holding A again to record.
+- The display, Wi-Fi, microphone and speaker are stopped during sleep.
+  The current answer and page remain in memory. On wake, Wi-Fi reconnects
+  immediately (up to 30 seconds), then the previous screen is restored. If
+  reconnection fails, the stick retries when you next ask a question.
+- Recording and network requests finish before the idle timer starts again.
+  An unfinished Serial Monitor question prevents automatic sleep.
+- USB serial is unavailable during sleep; use A to wake and reconnect the
+  monitor if needed.
+- Change `IDLE_SLEEP_MS` in `src/main.cpp` to adjust the idle timeout.
+
+Hardware validation after uploading: check manual sleep, idle sleep, A wake
+without accidental recording, answer-page retention, and the first voice/serial
+request after waking. Repeat on battery and USB power.
+
+
+## Chat model
+
+Pinned to `inclusionai/ling-3.0-flash-vl:free` for chat responses, avoiding
+random selection of specialized models such as safety classifiers. There is
+no automatic fallback to the free router. Free availability and rate limits
+can change. The model returned by OpenRouter is logged in Serial Monitor for
+every successful chat response, including empty answers.
+
+A newer release does not guarantee a newer knowledge cutoff. The stick has
+no web-search integration, so current events and other live facts may still
+be outdated. Changing the model does not add internet access.
