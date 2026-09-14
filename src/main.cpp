@@ -13,6 +13,8 @@
 // secrets.h defines:
 // WIFI_SSID
 // WIFI_PASSWORD
+// WIFI_SSID_FALLBACK (optional; leave "" to skip)
+// WIFI_PASSWORD_FALLBACK
 // OPENROUTER_API_KEY
 
 const char *CHAT_URL =
@@ -261,39 +263,67 @@ void enterSleep()
 
 // ---------- Wi-Fi ----------
 
+struct WifiNetwork
+{
+  const char *ssid;
+  const char *password;
+};
+
 bool connectWiFi(bool showFailure)
 {
   if (WiFi.status() == WL_CONNECTED)
     return true;
 
-  showStatus("Connecting...");
+  const WifiNetwork networks[] = {
+      {WIFI_SSID, WIFI_PASSWORD},
+      {WIFI_SSID_FALLBACK, WIFI_PASSWORD_FALLBACK},
+  };
+  constexpr size_t networkCount = sizeof(networks) / sizeof(networks[0]);
 
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-  const unsigned long started = millis();
-
-  while (
-      WiFi.status() != WL_CONNECTED &&
-      millis() - started < 30000)
+  for (size_t i = 0; i < networkCount; ++i)
   {
-    M5.update();
-    delay(20);
+    if (networks[i].ssid == nullptr || strlen(networks[i].ssid) == 0)
+      continue;
+
+    if (i > 0)
+    {
+      Serial.println("Retrying with fallback Wi-Fi network...");
+      showStatus("Retrying...");
+    }
+    else
+    {
+      showStatus("Connecting...");
+    }
+
+    WiFi.begin(networks[i].ssid, networks[i].password);
+
+    const unsigned long started = millis();
+
+    while (
+        WiFi.status() != WL_CONNECTED &&
+        millis() - started < 30000)
+    {
+      M5.update();
+      delay(20);
+    }
+
+    if (WiFi.status() == WL_CONNECTED)
+      return true;
+
+    WiFi.disconnect(true);
   }
 
-  if (WiFi.status() != WL_CONNECTED)
-  {
-    // Wake reconnects preserve the existing answer even if Wi-Fi is unavailable.
-    if (showFailure)
-      showMessage(
-        "WiFi failed.\n"
-        "Check your iPhone hotspot and\n"
-        "Maximize Compatibility setting.\n\n"
-        "Hold A to retry.");
-    return false;
-  }
+  // Wake reconnects preserve the existing answer even if Wi-Fi is unavailable.
+  if (showFailure)
+    showMessage(
+      "WiFi failed.\n"
+      "Check your iPhone hotspot and\n"
+      "Maximize Compatibility setting.\n\n"
+      "Hold A to retry.");
 
-  return true;
+  return false;
 }
 
 bool readyForRequest()
