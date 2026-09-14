@@ -8,7 +8,7 @@ LLM, shown on the built-in screen.
 
 1. Hold **Button A** and speak; release to stop recording (max 30 seconds).
 2. The recording is uploaded to [OpenRouter](https://openrouter.ai) for
-   transcription (`openai/whisper-large-v3`).
+   transcription by a speech-to-text model (`openai/whisper-large-v3-turbo`).
 3. The transcribed text is sent to a chat model (`inclusionai/ling-3.0-flash-vl:free`) and the
    reply is shown on screen.
 4. You can also type a question into the Serial Monitor instead of speaking;
@@ -32,20 +32,28 @@ Holding **Button B** for one second always returns to the home screen.
 
 ## Setup
 
-1. Install [PlatformIO](https://platformio.org/).
+1. Install PlatformIO, either as the [PlatformIO IDE extension for
+   VSCode](https://platformio.org/install/ide?install=vscode) or the
+   [PlatformIO Core CLI](https://platformio.org/install/cli).
 2. Copy `include/secrets.h.example` to `include/secrets.h` and fill in your
    Wi-Fi credentials and [OpenRouter API key](https://openrouter.ai/keys).
    This file is gitignored and should never be committed.
-3. Update `upload_port` / `monitor_port` in `platformio.ini` to match your
-   device's serial port.
-4. Build and upload:
-   ```
-   pio run --target upload
-   ```
-5. Open the serial monitor:
-   ```
-   pio device monitor
-   ```
+3. Build and upload (PlatformIO auto-detects the device's serial port on
+   both Windows and macOS):
+   - CLI:
+     ```
+     pio run --target upload
+     ```
+   - VSCode: open this folder with the PlatformIO extension installed, then
+     run the **PlatformIO: Upload** command (or click the arrow icon in the
+     PlatformIO toolbar at the bottom of the window).
+4. Open the serial monitor:
+   - CLI:
+     ```
+     pio device monitor
+     ```
+   - VSCode: run **PlatformIO: Serial Monitor**, or click the plug icon in
+     the PlatformIO toolbar.
 
 ## Notes
 
@@ -79,12 +87,24 @@ Repeat on battery and USB power.
 
 ## Chat model
 
-Pinned to `inclusionai/ling-3.0-flash-vl:free` for chat responses, avoiding
-random selection of specialized models such as safety classifiers. There is
-no automatic fallback to the free router. Free availability and rate limits
-can change. The model returned by OpenRouter is logged in Serial Monitor for
-every successful chat response, including empty answers.
+Pinned to `inclusionai/ling-3.0-flash-vl:free` for chat responses, with a
+fallback to `meta-llama/llama-3.3-70b-instruct:free` if the primary is
+rate-limited, avoiding random selection of specialized models such as
+safety classifiers. Free availability and rate limits can change. The model
+returned by OpenRouter is logged in Serial Monitor for every successful
+chat response, including empty answers.
 
 A newer release does not guarantee a newer knowledge cutoff. The stick has
 no web-search integration, so current events and other live facts may still
 be outdated. Changing the model does not add internet access.
+
+## Speech-to-text model
+
+Pinned to `openai/whisper-large-v3-turbo` via OpenRouter for transcribing
+recorded audio before it is sent to the chat model, with a fallback to
+`openai/whisper-large-v3` if the primary is rate-limited or unavailable.
+These are the cheapest and second-cheapest transcription models on
+OpenRouter. Accuracy depends on the model used and on microphone input
+quality; there is no local/offline fallback if OpenRouter is unreachable.
+The model used is logged in Serial Monitor for every successful
+transcription.
