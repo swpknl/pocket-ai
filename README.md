@@ -32,19 +32,28 @@ Holding **Button B** for one second always returns to the home screen.
 
 ## Setup
 
-1. Install [PlatformIO](https://platformio.org/).
+1. Install PlatformIO, either as the [PlatformIO IDE extension for
+   VSCode](https://platformio.org/install/ide?install=vscode) or the
+   [PlatformIO Core CLI](https://platformio.org/install/cli).
 2. Copy `include/secrets.h.example` to `include/secrets.h` and fill in your
    Wi-Fi credentials and [OpenRouter API key](https://openrouter.ai/keys).
    This file is gitignored and should never be committed.
 3. Build and upload (PlatformIO auto-detects the device's serial port on
    both Windows and macOS):
-   ```
-   pio run --target upload
-   ```
+   - CLI:
+     ```
+     pio run --target upload
+     ```
+   - VSCode: open this folder with the PlatformIO extension installed, then
+     run the **PlatformIO: Upload** command (or click the arrow icon in the
+     PlatformIO toolbar at the bottom of the window).
 4. Open the serial monitor:
-   ```
-   pio device monitor
-   ```
+   - CLI:
+     ```
+     pio device monitor
+     ```
+   - VSCode: run **PlatformIO: Serial Monitor**, or click the plug icon in
+     the PlatformIO toolbar.
 
 ## Notes
 
