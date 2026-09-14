@@ -21,8 +21,11 @@ const char *CHAT_URL =
 const char *TRANSCRIBE_URL =
     "https://openrouter.ai/api/v1/audio/transcriptions";
 
-// Pin a chat model so the free router cannot select a safety classifier.
+// Pin chat models so the free router cannot select a safety classifier.
+// CHAT_MODEL_FALLBACK is retried once if the primary is rate-limited or
+// unavailable (OpenRouter's free tier deprecates/limits models often).
 const char *CHAT_MODEL = "inclusionai/ling-3.0-flash-vl:free";
+const char *CHAT_MODEL_FALLBACK = "meta-llama/llama-3.3-70b-instruct:free";
 const char *TRANSCRIBE_MODEL = "openai/whisper-large-v3";
 
 constexpr uint32_t SAMPLE_RATE = 16000;
@@ -320,12 +323,18 @@ bool readyForRequest()
 
 // ---------- HTTP ----------
 
+bool isRetryableStatus(int status)
+{
+  return status == 429 || status == 404 || status == 503;
+}
+
 bool postRequest(
     const char *url,
     const String &contentType,
     uint8_t *body,
     size_t bodyLength,
-    JsonDocument &response)
+    JsonDocument &response,
+    int *statusOut = nullptr)
 {
   WiFiClientSecure tls;
 
@@ -355,6 +364,9 @@ bool postRequest(
       String("Bearer ") + OPENROUTER_API_KEY);
 
   const int status = http.POST(body, bodyLength);
+
+  if (statusOut)
+    *statusOut = status;
 
   if (status <= 0)
   {
@@ -428,45 +440,65 @@ void askQuestion(const String &question)
   Serial.println("\nQuestion: " + question);
   showStatus("Thinking...");
 
-  String body;
-
-  {
-    JsonDocument request;
-
-    request["model"] = CHAT_MODEL;
-    request["stream"] = false;
-    request["max_tokens"] = 1024;
-
-    JsonArray messages =
-        request["messages"].to<JsonArray>();
-
-    JsonObject system = messages.add<JsonObject>();
-    system["role"] = "system";
-    system["content"] =
-        "You are a helpful assistant on a tiny screen. "
-        "Keep your final answer under 100 words. "
-        "Use plain English and ASCII characters. "
-        "Do not use markdown or emoji.";
-
-    JsonObject user = messages.add<JsonObject>();
-    user["role"] = "user";
-    user["content"] = question;
-
-    serializeJson(request, body);
-  }
+  const char *models[] = {CHAT_MODEL, CHAT_MODEL_FALLBACK};
+  constexpr size_t modelCount = sizeof(models) / sizeof(models[0]);
 
   JsonDocument response;
+  bool ok = false;
+  int status = 0;
 
-  if (!postRequest(
-          CHAT_URL,
-          "application/json",
-          reinterpret_cast<uint8_t *>(
-              const_cast<char *>(body.c_str())),
-          body.length(),
-          response))
+  for (size_t i = 0; i < modelCount; ++i)
   {
-    return;
+    if (i > 0)
+    {
+      Serial.println("Retrying with fallback model...");
+      showStatus("Retrying...");
+    }
+
+    String body;
+
+    {
+      JsonDocument request;
+
+      request["model"] = models[i];
+      request["stream"] = false;
+      request["max_tokens"] = 1024;
+
+      JsonArray messages =
+          request["messages"].to<JsonArray>();
+
+      JsonObject system = messages.add<JsonObject>();
+      system["role"] = "system";
+      system["content"] =
+          "You are a helpful assistant on a tiny screen. "
+          "Keep your final answer under 100 words. "
+          "Use plain English and ASCII characters. "
+          "Do not use markdown or emoji.";
+
+      JsonObject user = messages.add<JsonObject>();
+      user["role"] = "user";
+      user["content"] = question;
+
+      serializeJson(request, body);
+    }
+
+    response.clear();
+
+    ok = postRequest(
+        CHAT_URL,
+        "application/json",
+        reinterpret_cast<uint8_t *>(
+            const_cast<char *>(body.c_str())),
+        body.length(),
+        response,
+        &status);
+
+    if (ok || !isRetryableStatus(status))
+      break;
   }
+
+  if (!ok)
+    return;
 
   Serial.print("Model: ");
   Serial.println(response["model"] | "unknown");
